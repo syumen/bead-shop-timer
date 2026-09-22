@@ -300,3 +300,178 @@ describe('经营统计页面切换', () => {
     expect(button('编辑布局')).toBeDefined();
   });
 });
+
+function detailRows(): HTMLTableRowElement[] {
+  return Array.from(container.querySelectorAll<HTMLTableRowElement>('[aria-label="今日接待详情"] tbody tr'));
+}
+
+async function openDetails() {
+  await act(async () => button('今日接待人数').click());
+  await waitForUI(() => expect(container.textContent).not.toContain('正在加载接待详情…'));
+}
+
+async function addDetailSeat(id: string, seatNumber: number, isActive = true) {
+  await db.seats.add({
+    id, seatNumber, isActive, x: 80, y: 80, width: 64, height: 64, rotation: 0,
+    createdAt: now, updatedAt: now,
+  });
+}
+
+describe('今日接待详情', () => {
+  it('点击卡片展开和收起，空状态位于统计卡片下方', async () => {
+    await renderStats();
+    expect(button('今日接待人数').getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelector('#daily-visitor-details')).toBeNull();
+
+    await openDetails();
+
+    expect(button('今日接待人数').getAttribute('aria-expanded')).toBe('true');
+    expect(button('今日接待人数').getAttribute('aria-controls')).toBe('daily-visitor-details');
+    expect(container.querySelector('.stats-grid')?.nextElementSibling?.id).toBe('daily-visitor-details');
+    expect(container.textContent).toContain('今日暂无接待记录');
+    await act(async () => button('今日接待人数').click());
+    expect(container.querySelector('#daily-visitor-details')).toBeNull();
+    expect(button('今日接待人数').getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it.each([
+    { minutes: 38, expected: '38分钟', endText: '09:40:02' },
+    { minutes: 106, expected: '1小时 46分钟', endText: '10:48:02' },
+  ])('completed 显示本地 HH:mm:ss 及固定总时长 $expected', async ({ minutes, expected, endText }) => {
+    const startedAt = new Date(2026, 8, 21, 9, 1, 3).getTime();
+    const endedAt = startedAt + minutes * minute + 59_000;
+    await addDetailSeat('seat-finished', 8);
+    await db.sessions.add(session('finished', startedAt, endedAt));
+    await renderStats();
+    await openDetails();
+
+    expect(detailRows()).toHaveLength(1);
+    expect(Array.from(detailRows()[0].cells).map((cell) => cell.textContent)).toEqual([
+      '座位 8', '09:01:03', endText, expected,
+    ]);
+    expect(Array.from(detailRows()[0].querySelectorAll('time')).map((time) => time.dateTime)).toEqual([
+      new Date(startedAt).toISOString(), new Date(endedAt).toISOString(),
+    ]);
+  });
+
+  it('active 显示进行中，按当前时间自动更新时长，completed 时长固定且不写数据库', async () => {
+    const active = session('active-detail', now - 38 * minute);
+    const completed = session('completed-detail', now - 120 * minute, now - 14 * minute);
+    await db.sessions.bulkAdd([completed, active]);
+    await db.operationLogs.add({ id: 'start', sessionId: active.id, seatId: active.seatId, action: 'START', occurredAt: active.startedAt });
+    const originals = await db.sessions.toArray();
+    const logs = await db.operationLogs.toArray();
+    await renderStats();
+    await openDetails();
+    expect(detailRows()[0].cells[2].textContent).toBe('进行中');
+    expect(detailRows()[0].cells[3].textContent).toBe('38分钟');
+    expect(detailRows()[1].cells[3].textContent).toBe('1小时 46分钟');
+
+    now += minute;
+    await waitForUI(() => expect(detailRows()[0].cells[3].textContent).toBe('39分钟'));
+    expect(detailRows()[1].cells[3].textContent).toBe('1小时 46分钟');
+    expect(await db.sessions.toArray()).toEqual(originals);
+    expect(await db.operationLogs.toArray()).toEqual(logs);
+  });
+
+  it('软删除座位仍显示原编号，找不到 Seat 时显示未知座位', async () => {
+    await addDetailSeat('seat-deleted', 12, false);
+    await db.sessions.bulkAdd([
+      session('deleted', now - 10 * minute, now - minute),
+      session('missing', now - 5 * minute),
+    ]);
+    await renderStats();
+    await openDetails();
+    expect(detailRows().map((row) => row.cells[0].textContent)).toEqual(['未知座位', '座位 12']);
+  });
+
+  it('明细数量与 totalVisitors 相同，包含今天所有状态和边界内记录，排除非今日 startedAt', async () => {
+    const dayStart = new Date(2026, 8, 21).getTime();
+    const nextDayStart = new Date(2026, 8, 22).getTime();
+    const included = [
+      session('midnight', dayStart, dayStart + minute),
+      session('active', now - minute),
+      session('cross-midnight', nextDayStart - 1, nextDayStart + minute),
+      { ...session('invalid-completed', now - 2 * minute), status: 'completed' as const },
+    ];
+    await db.sessions.bulkAdd([
+      ...included,
+      session('yesterday', dayStart - 1, dayStart + minute),
+      session('yesterday-active', dayStart - 2 * minute),
+      session('tomorrow', nextDayStart, nextDayStart + minute),
+    ]);
+    await renderStats();
+    await openDetails();
+
+    expect(metric('今日接待人数')).toBe(`${included.length}人`);
+    expect(detailRows()).toHaveLength(included.length);
+    expect(detailRows().map((row) => row.cells[1].querySelector('time')?.dateTime)).toEqual(
+      [...included].sort((a, b) => b.startedAt - a.startedAt).map((item) => new Date(item.startedAt).toISOString()),
+    );
+    const invalidRow = detailRows().find((row) => row.cells[2].textContent === '—');
+    expect(invalidRow?.cells[3].textContent).toBe('时长异常');
+    expect(detailRows().at(-1)?.cells[1].textContent).toBe('00:00:00');
+  });
+
+  it('按 startedAt 倒序，而非 endedAt 或记录 ID 排序', async () => {
+    const older = session('z-old', now - 60 * minute, now);
+    const middle = session('a-middle', now - 30 * minute, now - 15 * minute);
+    const newest = session('m-new', now - 10 * minute);
+    await db.sessions.bulkAdd([newest, older, middle]);
+    await renderStats();
+    await openDetails();
+    expect(detailRows().map((row) => row.cells[1].querySelector('time')?.dateTime)).toEqual(
+      [newest, middle, older].map((item) => new Date(item.startedAt).toISOString()),
+    );
+  });
+
+  it.each(['周', '月'])('切到%s模式关闭详情且无详情入口，返回日模式保持收起', async (period) => {
+    await renderStats();
+    await openDetails();
+    await act(async () => button(period).click());
+    await waitForUI(() => expect(container.textContent).toContain(period === '周' ? '本周接待人数' : '本月接待人数'));
+    expect(container.querySelector('#daily-visitor-details')).toBeNull();
+    expect(container.querySelector('.stats-card button')).toBeNull();
+    await act(async () => button('日').click());
+    await waitForUI(() => expect(metric('今日接待人数')).toBe('0人'));
+    expect(button('今日接待人数').getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('展开后 START 和 END 自动更新明细，不足一分钟显示提示，END 后固定最终时长', async () => {
+    await addDetailSeat('seat-live-detail', 3);
+    await renderStats();
+    await openDetails();
+    let active!: Session;
+    await act(async () => { active = await startSession('seat-live-detail'); });
+    await waitForUI(() => {
+      expect(metric('今日接待人数')).toBe('1人');
+      expect(detailRows()[0]?.cells[2].textContent).toBe('进行中');
+      expect(detailRows()[0]?.cells[3].textContent).toBe('不足1分钟');
+    });
+
+    now += 38 * minute;
+    const endedAt = now;
+    await act(async () => { await endSession(active.id); });
+    await waitForUI(() => {
+      expect(detailRows()[0].cells[2].querySelector('time')?.dateTime).toBe(new Date(endedAt).toISOString());
+      expect(detailRows()[0].cells[3].textContent).toBe('38分钟');
+      expect(metric('今日接待人数')).toBe('1人');
+    });
+    expect(await db.operationLogs.count()).toBe(2);
+  });
+
+  it('跨本地午夜时明细与今日接待人数同时切换到新一天', async () => {
+    now = new Date(2026, 8, 21, 23, 59, 59).getTime();
+    await db.sessions.add(session('overnight', now - 10 * minute));
+    await renderStats();
+    await openDetails();
+    expect(detailRows()).toHaveLength(1);
+    now = new Date(2026, 8, 22).getTime();
+    await waitForUI(() => {
+      expect(metric('今日接待人数')).toBe('0人');
+      expect(container.textContent).toContain('今日暂无接待记录');
+      expect(detailRows()).toHaveLength(0);
+    });
+    expect(await db.sessions.count()).toBe(1);
+  });
+});

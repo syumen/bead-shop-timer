@@ -1,6 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useState } from 'react';
 import DataManagement from '../components/DataManagement';
+import DailyVisitorDetails from '../components/DailyVisitorDetails';
 import { useCurrentTime } from '../hooks/useCurrentTime';
 import { getDailyStats, getMonthlyStats, getWeeklyStats } from '../services/statsService';
 
@@ -19,7 +20,9 @@ function formatDuration(durationMs: number): string {
 
 export default function StatsPage() {
   const [period, setPeriod] = useState<keyof typeof statsPeriods>('daily');
-  const today = new Date(useCurrentTime(true));
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
+  const now = useCurrentTime(true);
+  const today = new Date(now);
   const dayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
   const { label: periodLabel, getStats } = statsPeriods[period];
   const stats = useLiveQuery(
@@ -35,10 +38,10 @@ export default function StatsPage() {
           <button type="button" aria-pressed={period === 'daily'} onClick={() => setPeriod('daily')}>
             日
           </button>
-          <button type="button" aria-pressed={period === 'weekly'} onClick={() => setPeriod('weekly')}>
+          <button type="button" aria-pressed={period === 'weekly'} onClick={() => { setPeriod('weekly'); setDetailsExpanded(false); }}>
             周
           </button>
-          <button type="button" aria-pressed={period === 'monthly'} onClick={() => setPeriod('monthly')}>
+          <button type="button" aria-pressed={period === 'monthly'} onClick={() => { setPeriod('monthly'); setDetailsExpanded(false); }}>
             月
           </button>
         </div>
@@ -47,8 +50,20 @@ export default function StatsPage() {
         <p role="status" className="empty-state surface">正在加载经营统计…</p>
       ) : (
         <dl className="stats-grid">
-          <div className="stats-card">
-            <dt>{periodLabel}接待人数</dt>
+          <div className={`stats-card${period === 'daily' ? ' stats-card-expandable' : ''}`}>
+            <dt>
+              {period === 'daily' ? (
+                <button
+                  type="button"
+                  className="stats-card-toggle"
+                  aria-expanded={detailsExpanded}
+                  aria-controls="daily-visitor-details"
+                  onClick={() => setDetailsExpanded(!detailsExpanded)}
+                >
+                  今日接待人数
+                </button>
+              ) : `${periodLabel}接待人数`}
+            </dt>
             <dd>{stats.totalVisitors}人</dd>
           </div>
           <div className="stats-card">
@@ -68,6 +83,9 @@ export default function StatsPage() {
             <dd>{formatDuration(stats.averageDurationMs)}</dd>
           </div>
         </dl>
+      )}
+      {stats && period === 'daily' && detailsExpanded && (
+        <DailyVisitorDetails dayStart={dayStart} now={now} />
       )}
       <DataManagement />
     </main>

@@ -121,6 +121,13 @@ h2 { font-size: 21px; line-height: 1.4; }
 .stats-card dt { margin-bottom: 14px; color: var(--muted); }
 .stats-card dd { font-size: 28px; font-weight: 650; line-height: 1.4; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .stats-card-duration dd { font-size: 23px; }
+.stats-card-expandable { position: relative; }
+.stats-card-toggle { min-height: 0; padding: 0; border: 0; border-radius: 0; font: inherit; color: var(--primary); text-align: left; text-decoration: underline; text-underline-offset: 3px; background: transparent; }
+.stats-card-toggle:hover:not(:disabled) { background: transparent; }
+.stats-card-toggle::after { content: ""; position: absolute; inset: 0; border-radius: 10px; }
+.stats-card-toggle:focus-visible::after { outline: 3px solid #5285a7; outline-offset: 3px; }
+.daily-visitor-details { margin-top: 24px; }
+.daily-visitor-details h2 { margin-bottom: 16px; }
 .data-management { margin-top: 24px; }
 .data-management > .panel-actions { justify-content: flex-start; }
 .today-completed { margin-top: 24px; }
