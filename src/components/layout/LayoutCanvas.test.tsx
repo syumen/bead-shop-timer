@@ -337,24 +337,44 @@ describe('营业模式单座位 END', () => {
     expect(await db.operationLogs.count()).toBe(1);
   });
 
-  it('确认后直接调用 endSession，成功关闭面板并恢复空闲及 START 入口', async () => {
+  it.each([
+    { minutes: 38, duration: '38分钟' },
+    { minutes: 106, duration: '1小时 46分钟' },
+  ])('END 后保留结果，显示 $duration，完成后才关闭并可重新 START', async ({ minutes, duration }) => {
+    const startedAt = new Date(2026, 8, 22, 9).getTime();
+    const endedAt = startedAt + minutes * 60_000 + 59_000;
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
     const session = await sessionService.startSession(seat.id);
     const end = vi.spyOn(sessionService, 'endSession');
     await renderLayout();
     await click(seatElement());
     await click(button('结束计时'));
 
+    clock.mockReturnValue(endedAt);
     await click(button('确认结束'));
     await waitForUI(() => {
-      expect(panel()).toBeNull();
+      expect(panel()?.textContent).toContain(`本次总时长：${duration}`);
       expect(seatElement().textContent).toContain('空闲');
       expect(seatElement().textContent).not.toMatch(/\d{2}:\d{2}:\d{2}/);
       expect(container.querySelector('[aria-label="当前在店人数"]')?.textContent).toContain('0人');
+      expect(container.querySelector('[aria-label="今日已结束"] tbody')?.textContent).toContain(duration);
     });
 
+    expect(panel()?.querySelector('h2')?.textContent).toBe('座位 1');
+    expect(Array.from(panel()!.querySelectorAll('time')).map((time) => time.dateTime)).toEqual([
+      new Date(startedAt).toISOString(), new Date(endedAt).toISOString(),
+    ]);
+    expect(panel()?.textContent).not.toContain('确认结束');
+    expect(panel()?.textContent).not.toContain('当前已用时');
+    expect(Array.from(panel()!.querySelectorAll('button')).map((item) => item.textContent)).toEqual(['完成']);
     expect(end).toHaveBeenCalledExactlyOnceWith(session.id);
     expect(await db.sessions.get(session.id)).toMatchObject({ status: 'completed', endedAt: expect.any(Number) });
     expect(await db.operationLogs.filter((log) => log.action === 'END').count()).toBe(1);
+    const completed = await db.sessions.get(session.id);
+    await click(button('完成'));
+    expect(panel()).toBeNull();
+    expect(await db.sessions.get(session.id)).toEqual(completed);
+    expect(await db.operationLogs.count()).toBe(2);
     await click(seatElement());
     expect(panel()?.textContent).toContain('当前状态：空闲');
     expect(button('开始计时').disabled).toBe(false);
@@ -397,7 +417,7 @@ describe('营业模式单座位 END', () => {
     }
 
     await waitForUI(() => {
-      expect(panel()).toBeNull();
+      expect(panel()?.textContent).toContain('本次总时长：');
       expect(seatElement().textContent).toContain('空闲');
     });
     expect(end).toHaveBeenCalledTimes(1);

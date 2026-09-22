@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { Session } from '../../db/models';
+import { formatSessionDuration } from '../../utils/sessionDuration';
 import { formatElapsedTime } from './SeatStatus';
 
 interface EndSessionPanelProps {
@@ -22,6 +23,7 @@ export default function EndSessionPanel({
   onClose,
 }: EndSessionPanelProps) {
   const [isConfirming, setIsConfirming] = useState(false);
+  const isCompleted = session.status === 'completed';
 
   return (
     <section
@@ -29,7 +31,7 @@ export default function EndSessionPanel({
       aria-labelledby="end-session-title"
       onKeyDown={(event) => {
         if (event.key !== 'Escape' || isEnding) return;
-        if (isConfirming) setIsConfirming(false);
+        if (isConfirming && !isCompleted) setIsConfirming(false);
         else onClose();
       }}
       className="session-panel"
@@ -44,10 +46,28 @@ export default function EndSessionPanel({
             {new Date(session.startedAt).toLocaleString('zh-CN', { hour12: false })}
           </time>
         </p>
-        <p>当前已用时：<strong>{formatElapsedTime(session.startedAt, now)}</strong></p>
+        {isCompleted ? (
+          <>
+            <p>
+              结束时间：
+              {session.endedAt === null ? '—' : (
+                <time dateTime={new Date(session.endedAt).toISOString()}>
+                  {new Date(session.endedAt).toLocaleString('zh-CN', { hour12: false })}
+                </time>
+              )}
+            </p>
+            <p>本次总时长：<strong>{formatSessionDuration(session)}</strong></p>
+          </>
+        ) : (
+          <p>当前已用时：<strong>{formatElapsedTime(session.startedAt, now)}</strong></p>
+        )}
       </div>
       {error && <p role="alert" className="error-message">{error}</p>}
-      {isConfirming ? (
+      {isCompleted ? (
+        <div className="panel-actions">
+          <button type="button" className="button-primary" autoFocus onClick={onClose}>完成</button>
+        </div>
+      ) : isConfirming ? (
         <div className="confirmation-box">
           <p className="confirmation-text">确认结束座位 {seatNumber} 的计时？</p>
           <div className="panel-actions">

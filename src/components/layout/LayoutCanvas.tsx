@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useMemo, useRef, useState } from 'react';
 import { db } from '../../db/database';
-import type { Seat } from '../../db/models';
+import type { Seat, Session } from '../../db/models';
 import { useCurrentTime } from '../../hooks/useCurrentTime';
 import {
   addSeat,
@@ -20,10 +20,12 @@ import SeatItem from './SeatItem';
 import { mapActiveSessionsBySeat } from './SeatStatus';
 import StartSessionPanel from './StartSessionPanel';
 import TableItem from './TableItem';
+import TodayCompletedSessions from './TodayCompletedSessions';
 
 type SelectedPanel =
   | { type: 'start'; seatId: string }
-  | { type: 'end'; seatId: string; sessionId: string };
+  | { type: 'end'; seatId: string; sessionId: string }
+  | { type: 'result'; seatId: string; seatNumber: number; session: Session };
 
 export default function LayoutCanvas() {
   const [isEditing, setIsEditing] = useState(false);
@@ -50,8 +52,10 @@ export default function LayoutCanvas() {
   const selectedSession = selectedPanel?.type === 'end'
     ? layout?.activeSessions.find((session) => session.id === selectedPanel.sessionId)
     : undefined;
-  const isSessionPanelVisible = !isEditing && Boolean(selectedSeat)
-    && (selectedPanel?.type === 'start' || Boolean(selectedSession));
+  const endPanelSession = selectedPanel?.type === 'result' ? selectedPanel.session : selectedSession;
+  const endPanelSeatNumber = selectedPanel?.type === 'result' ? selectedPanel.seatNumber : selectedSeat?.seatNumber;
+  const isSessionPanelVisible = !isEditing && (selectedPanel?.type === 'result'
+    || (Boolean(selectedSeat) && (selectedPanel?.type === 'start' || Boolean(selectedSession))));
 
   function openSeatPanel(seatId: string) {
     if (isEditing || isSaving || sessionPending.current) return;
@@ -81,14 +85,14 @@ export default function LayoutCanvas() {
   }
 
   async function confirmEnd() {
-    if (isEditing || selectedPanel?.type !== 'end' || !selectedSession || sessionPending.current) return;
+    if (isEditing || selectedPanel?.type !== 'end' || !selectedSession || !selectedSeat || sessionPending.current) return;
 
     sessionPending.current = true;
     setPendingAction('end');
     setError(null);
     try {
-      await endSession(selectedSession.id);
-      setSelectedPanel(null);
+      const completed = await endSession(selectedSession.id);
+      setSelectedPanel({ type: 'result', seatId: completed.seatId, seatNumber: selectedSeat.seatNumber, session: completed });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '结束计时失败，请重试');
     } finally {
@@ -173,11 +177,11 @@ export default function LayoutCanvas() {
           onCancel={() => setSelectedPanel(null)}
         />
       )}
-      {!isEditing && selectedSeat && selectedSession && (
+      {!isEditing && endPanelSeatNumber !== undefined && endPanelSession && (
         <EndSessionPanel
-          key={selectedSession.id}
-          seatNumber={selectedSeat.seatNumber}
-          session={selectedSession}
+          key={endPanelSession.id}
+          seatNumber={endPanelSeatNumber}
+          session={endPanelSession}
           now={now}
           isEnding={pendingAction === 'end'}
           error={error}
@@ -231,6 +235,7 @@ export default function LayoutCanvas() {
           )}
         </div>
       </div>
+      {!isEditing && <TodayCompletedSessions />}
     </main>
   );
 }

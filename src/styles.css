@@ -123,6 +123,8 @@ h2 { font-size: 21px; line-height: 1.4; }
 .stats-card-duration dd { font-size: 23px; }
 .data-management { margin-top: 24px; }
 .data-management > .panel-actions { justify-content: flex-start; }
+.today-completed { margin-top: 24px; }
+.today-completed h2 { margin-bottom: 16px; }
 
 @media (max-width: 1100px) {
   .stats-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
