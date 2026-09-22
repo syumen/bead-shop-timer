@@ -1,0 +1,16 @@
+node_modules/
+.pnpm-store/
+dist/
+*.local
+
+# Local credentials and exported business data
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+backups/
+拼豆店备份_*.json
+.backup-*.json
+.backup-acceptance-*.html
+.acceptance-*.html
